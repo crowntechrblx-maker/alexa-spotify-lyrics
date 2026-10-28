@@ -48,8 +48,12 @@
 
       if (!token) {
         document.getElementById('form').style.display = 'none';
-        msg.innerHTML = 'This browser doesn\'t have your display token yet.<br>Open your full display link ' +
-          '(<code>/?t=…</code>, shown after Spotify login) in this browser once, then come back here.';
+        msg.innerHTML = '<b>Is this the screen you want lyrics on?</b><br>Tap the button below. It will show a 6-digit code; ' +
+          'then open <code>' + location.host + '/pair</code> on your phone or computer and enter it there.' +
+          '<br><br><a href="/" style="display:inline-block;padding:14px 28px;border-radius:30px;background:#1ed760;color:#000;' +
+          'font-weight:700;text-decoration:none">Show the code</a>' +
+          '<br><br><small>Approving on a phone or computer? Open your full display link (<code>/?t=…</code>, shown after ' +
+          'Spotify login) in that browser once, then come back to this page.</small>';
         return;
       }
 
