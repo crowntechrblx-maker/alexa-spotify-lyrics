@@ -3,7 +3,7 @@ services:
   - type: web
     name: spotify-lyrics
     runtime: node
-    # "free" sleeps when nothing is polling it; "starter" stays awake.
+    # Free plan: sleeps when nothing is polling it, wakes on the next visit.
     plan: free
     buildCommand: npm ci --omit=dev
     startCommand: npm start
@@ -17,10 +17,9 @@ services:
         sync: false
       - key: SPOTIFY_REDIRECT_URI
         sync: false
+      # Free Postgres from https://neon.tech (doesn't expire). Paste its connection string.
       - key: DATABASE_URL
-        fromDatabase:
-          name: spotify-lyrics-db
-          property: connectionString
+        sync: false
       - key: SESSION_SECRET
         generateValue: true
       - key: ADMIN_KEY
@@ -28,9 +27,3 @@ services:
       - key: DISPLAY_TOKEN
         generateValue: true
 
-databases:
-  - name: spotify-lyrics-db
-    # Render's free Postgres expires after 30 days; "basic-256mb" doesn't.
-    plan: free
-    databaseName: spotify_lyrics
-    user: spotify_lyrics

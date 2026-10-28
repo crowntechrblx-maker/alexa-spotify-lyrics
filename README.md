@@ -26,7 +26,7 @@ browser.
 
 1. [Create the Spotify developer app](#1-create-the-spotify-developer-app)
 2. [Run it locally](#2-run-it-locally)
-3. [Deploy to Render (with Postgres and your own subdomain)](#3-deploy-to-render)
+3. [Deploy for free (Render + Neon, optional subdomain)](#3-deploy-to-render)
 4. [Log in to Spotify once](#4-log-in-to-spotify-once)
 5. [Put it on the Echo Show](#5-put-it-on-the-echo-show)
 6. [Reference: API, settings, troubleshooting](#reference)
@@ -110,34 +110,48 @@ Spotify with placeholder songs (no account needed). Open the link it prints.
 
 ## 3. Deploy to Render
 
-[Render](https://render.com) runs the server and the database. The included `render.yaml` sets
-everything up.
+Everything here is **free**: [Render](https://render.com) runs the server and
+[Neon](https://neon.tech) provides the PostgreSQL database. Neon's free database doesn't expire,
+unlike Render's.
 
-### 3a. Create the services
+### 3a. Create the free database on Neon
+
+1. Sign up at <https://neon.tech> (you can log in with GitHub). No card is needed.
+2. Create a project with any name. Pick the region closest to where you'll run Render.
+3. On the project dashboard, click **Connect** and copy the **connection string**. It looks like
+   `postgresql://user:password@ep-something.eu-central-1.aws.neon.tech/neondb?sslmode=require`.
+   Keep it handy; this is your `DATABASE_URL`. The app creates its tables by itself on first start.
+
+### 3b. Create the web service on Render
 
 1. Push this project to your GitHub account (it already is if you're reading this there).
 2. In the Render dashboard click **New → Blueprint** and pick this repository.
-3. Render reads `render.yaml` and shows a web service (`spotify-lyrics`) and a PostgreSQL
-   database (`spotify-lyrics-db`). It asks for the values it can't generate:
+3. Render reads `render.yaml` and shows one free web service (`spotify-lyrics`). It asks for the
+   values it can't generate:
    - `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`: from step 1.
    - `SPOTIFY_REDIRECT_URI`: `https://lyrics.example.com/auth/callback` with your own domain. If
-     you're skipping the custom domain, use `https://spotify-lyrics-XXXX.onrender.com/auth/callback`;
-     you'll see the exact `onrender.com` address after the first deploy, and you can edit this
-     value then.
-4. Click **Apply**. `SESSION_SECRET`, `ADMIN_KEY` and `DISPLAY_TOKEN` are generated for you, and
-   `DATABASE_URL` is wired to the new database automatically.
-5. When the deploy finishes, open the service → **Environment** to see your generated
-   `ADMIN_KEY` and `DISPLAY_TOKEN`. You'll need them in steps 4 and 5.
+     you're skipping the custom domain, put `https://example.com/auth/callback` for now; you'll
+     see your real `onrender.com` address after the first deploy and can change it then.
+   - `DATABASE_URL`: the Neon connection string from 3a.
+4. Click **Apply**. `SESSION_SECRET`, `ADMIN_KEY` and `DISPLAY_TOKEN` are generated for you.
+5. When the deploy shows **Live**, copy your address from the top of the page (e.g.
+   `https://spotify-lyrics-xxxx.onrender.com`).
+6. Set the redirect URI to that address plus `/auth/callback` in **both** places:
+   - Render → service → **Environment** → `SPOTIFY_REDIRECT_URI` (saving redeploys), and
+   - the Spotify dashboard → your app → **Settings → Edit → Redirect URIs**.
+7. While you're on Render's **Environment** page, reveal and copy `ADMIN_KEY` and
+   `DISPLAY_TOKEN`. You'll need them in steps 4 and 5.
 
-About plans: the blueprint uses Render's **free** plans. A free web service goes to sleep when
-nothing is using it, and wakes up (taking about a minute) when the Echo next loads the page. While
-the display is open it polls constantly, so it stays awake. Render's free PostgreSQL databases
-currently **expire after 30 days**. For something you'll leave running, change the database plan
-to `basic-256mb` (a few dollars a month) in `render.yaml` or the dashboard. If the database is
-ever replaced, the only effect is that you log in once more (step 4); the lyrics cache simply
-refills.
+**Don't skip `DATABASE_URL` on Render.** Render's free servers lose their files whenever they
+restart or wake from sleep. Without a database you'd have to log in to Spotify again after every
+restart.
 
-### 3b. Add a custom subdomain (optional)
+About the free plan: a free Render service goes to sleep after about 15 minutes with no visitors,
+and the next visit takes about a minute to wake it. While the Echo shows the page it checks in
+every 3 seconds, so it stays awake. The free plan's monthly hours cover one service running all
+month.
+
+### 3c. Add a custom subdomain (optional)
 
 Example: `lyrics.example.com`.
 
