@@ -23,6 +23,17 @@ const config = {
 
   lrclibUrl: trimSlash(process.env.LRCLIB_URL || 'https://lrclib.net'),
 
+  // Optional: Spotify's own lyrics via your web-player login cookie (unofficial).
+  spotifyWeb: {
+    spDc: (process.env.SPOTIFY_SP_DC || '').trim(),
+    webUrl: trimSlash(process.env.SPOTIFY_WEB_URL || 'https://open.spotify.com'),
+    spclientUrl: trimSlash(process.env.SPOTIFY_SPCLIENT_URL || 'https://spclient.wg.spotify.com'),
+    // Community-maintained list of the web player's rotating TOTP secrets (data only).
+    secretsUrl:
+      process.env.SPOTIFY_SECRETS_URL ||
+      'https://raw.githubusercontent.com/Thereallo1026/spotify-secrets/refs/heads/main/secrets/secretDict.json',
+  },
+
   databaseUrl: process.env.DATABASE_URL || '',
   // "true" / "false" to force; otherwise SSL is used for any non-local, fully qualified host.
   databaseSsl: process.env.DATABASE_SSL,

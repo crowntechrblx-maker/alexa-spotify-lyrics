@@ -20,6 +20,9 @@ services:
       # Free Postgres from https://neon.tech (doesn't expire). Paste its connection string.
       - key: DATABASE_URL
         sync: false
+      # Optional: Spotify's own lyrics as a fallback (see README). Leave empty to turn off.
+      - key: SPOTIFY_SP_DC
+        sync: false
       - key: SESSION_SECRET
         generateValue: true
       - key: ADMIN_KEY

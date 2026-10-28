@@ -13,6 +13,7 @@ browser.
 - **Tap the album art** for play/pause/previous/next (needs Spotify Premium).
 - Idle clock screen with the last played artwork when nothing is playing.
 - Lyrics come from [LRCLIB](https://lrclib.net) (free, no key needed) and are cached in PostgreSQL.
+  Optionally, Spotify's own lyrics fill the gaps ([see below](#optional-spotifys-own-lyrics)).
 
 > **How the timing works:** the page follows whatever is playing on your Spotify account, on any
 > device. It checks Spotify every 3 seconds, keeps a smooth local clock in between, and corrects
@@ -245,6 +246,7 @@ render.yaml    Render blueprint
 | `ADMIN_KEY` | yes | Required as `?key=` on `/auth/login` |
 | `DISPLAY_TOKEN` | yes | Required as `?t=` on the page and for every `/api` call |
 | `DATABASE_SSL` | no | `true` or `false` to override automatic SSL detection |
+| `SPOTIFY_SP_DC` | no | Turns on Spotify's own lyrics as a fallback (unofficial, see above) |
 | `PORT` | no | Defaults to 3000 (Render sets it automatically) |
 
 ### API
@@ -260,6 +262,7 @@ header.
 | `POST /api/control/seek?positionMs=…` | Jump to a position (used by tap-a-line). |
 | `GET /api/art?url=…` | Same-origin copy of Spotify album art, used only if colour extraction is blocked by CORS. |
 | `GET /auth/login?key=ADMIN_KEY` | Starts Spotify login. |
+| `GET /auth/check?key=ADMIN_KEY` | Setup self-check: Spotify login, database, `sp_dc` cookie. |
 | `GET /healthz` | Health check for Render. |
 
 **Rate limiting:** however many screens are polling, the server calls Spotify's
@@ -269,6 +272,33 @@ with the progress moved forward. If Spotify returns `429`, the server waits for 
 
 **Lyrics cache:** results are stored per Spotify track ID, including "no lyrics found". Misses are
 retried after 3 days in case someone adds the lyrics to LRCLIB.
+
+### Optional: Spotify's own lyrics
+
+Some songs have lyrics in the Spotify app but not on LRCLIB. If you set `SPOTIFY_SP_DC`, the
+server asks Spotify's web player for lyrics whenever LRCLIB has no synced lyrics.
+
+**Read this first:** this uses a private Spotify endpoint, not the public API. It's against
+Spotify's terms, it can stop working whenever Spotify changes things, and the cookie is
+effectively your Spotify login, so keep it secret. LRCLIB is always tried first.
+
+1. On a computer, open <https://open.spotify.com> in Chrome or Edge and make sure you're logged in.
+2. Press **F12** to open the developer tools and go to the **Application** tab (in Firefox,
+   **Storage**).
+3. In the left panel, expand **Cookies** and click `https://open.spotify.com`.
+4. Find the row named **`sp_dc`** and copy its whole **Value**. It's a long string.
+5. In Render → your service → **Environment**, add `SPOTIFY_SP_DC` with that value and save.
+6. After the redeploy, open `/auth/check?key=YOUR_ADMIN_KEY`. It should say **"The sp_dc
+   cookie works"**.
+
+Then:
+- **If logging out of Spotify in that browser:** the cookie may stop working. Remove the browser's
+  cookies instead of logging out, or just repeat the steps.
+- **When the cookie expires** (roughly yearly): repeat the steps.
+- **If `/auth/check` reports "Could not load web player secrets":** the community-maintained list
+  of the web player's rotating keys has moved. Set `SPOTIFY_SECRETS_URL` to its new address.
+
+Songs that previously had no lyrics are looked up again automatically once this is switched on.
 
 ### Troubleshooting
 

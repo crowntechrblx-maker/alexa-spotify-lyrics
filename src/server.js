@@ -8,6 +8,7 @@ const { config, validate } = require('./config');
 const { createStore } = require('./store');
 const { SpotifyClient } = require('./spotify');
 const { LyricsService } = require('./lyrics');
+const { SpotifyLyrics } = require('./spotifyLyrics');
 
 const ART_HOSTS = /(^|\.)(scdn\.co|spotifycdn\.com)$/i;
 const STATE_COOKIE = 'oauth_state';
@@ -94,7 +95,7 @@ function createPairing() {
   };
 }
 
-function createApp({ store, spotify, lyrics }) {
+function createApp({ store, spotify, lyrics, spotifyLyrics }) {
   const app = express();
   const pairing = createPairing();
   app.set('trust proxy', 1);
@@ -169,6 +170,23 @@ function createApp({ store, spotify, lyrics }) {
 <a href="/pair?t=${encodeURIComponent(config.displayToken)}">${escapeHtml(req.get('host'))}/pair</a>.</p>`
       )
     );
+  });
+
+  // Setup self-check for the owner: is Spotify connected, does the sp_dc cookie work?
+  app.get('/auth/check', async (req, res) => {
+    if (!config.adminKey || !safeEqual(String(req.query.key || ''), config.adminKey)) {
+      return res.status(403).send(page('Forbidden', '<h1>Forbidden</h1><p>Add <code>?key=YOUR_ADMIN_KEY</code> to the URL.</p>'));
+    }
+    const rows = [];
+    const connected = await spotify.isConnected().catch(() => false);
+    rows.push([connected, connected ? 'Spotify account connected.' : 'Spotify account not connected. Use /auth/login?key=…']);
+    rows.push([store.kind === 'postgres', store.kind === 'postgres' ? 'Using the PostgreSQL database.' : `Using the ${store.kind} store (set DATABASE_URL to keep your login across restarts).`]);
+    if (spotifyLyrics) {
+      const t = await spotifyLyrics.selfTest();
+      rows.push([t.ok, `Spotify lyrics: ${t.message}`]);
+    }
+    const list = rows.map(([ok, text]) => `<li>${ok ? '✅' : '⚠️'} ${escapeHtml(text)}</li>`).join('');
+    res.send(page('Setup check', `<h1>Setup check</h1><ul style="list-style:none;padding:0;line-height:2">${list}</ul>`));
   });
 
   // ---- Pairing (public; the approve step below needs the token) ------------
@@ -292,8 +310,10 @@ async function main() {
   const store = createStore();
   await store.init();
   const spotify = new SpotifyClient(store);
-  const lyrics = new LyricsService(store);
-  const app = createApp({ store, spotify, lyrics });
+  const spotifyLyrics = new SpotifyLyrics();
+  const lyrics = new LyricsService(store, spotifyLyrics);
+  const app = createApp({ store, spotify, lyrics, spotifyLyrics });
+  if (spotifyLyrics.enabled) console.log('Spotify lyrics fallback: on (SPOTIFY_SP_DC is set)');
 
   const server = app.listen(config.port, () => {
     console.log(`Lyrics display listening on http://localhost:${config.port} (store: ${store.kind})`);

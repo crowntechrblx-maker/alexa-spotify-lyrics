@@ -63,6 +63,7 @@ async function lrclib(path, params) {
 function classify(record) {
   if (!record) return 'none';
   if (record.syncedLyrics && record.syncedLyrics.trim()) return 'synced';
+  if (Array.isArray(record.lines) && record.lines.length) return 'synced';
   if (record.plainLyrics && record.plainLyrics.trim()) return 'plain';
   if (record.instrumental) return 'instrumental';
   return 'none';
@@ -139,9 +140,10 @@ async function findRecord(meta) {
   return record;
 }
 
-function buildPayload(trackId, record) {
+function buildPayload(trackId, record, source = 'lrclib') {
   const status = classify(record);
-  const lines = status === 'synced' ? parseLrc(record.syncedLyrics) : [];
+  let lines = [];
+  if (status === 'synced') lines = record.lines || parseLrc(record.syncedLyrics);
   return {
     trackId,
     status,
@@ -150,28 +152,51 @@ function buildPayload(trackId, record) {
     wordSynced: lines.some((l) => Array.isArray(l.words)),
     plainLyrics: status === 'synced' || status === 'plain' ? (record.plainLyrics || '').trim() || null : null,
     message: MESSAGES[status],
-    source: record ? 'lrclib' : null,
-    lookupVersion: LOOKUP_VERSION,
+    source: record ? source : null,
   };
 }
 
 // Misses (and plain-only results) are retried after a while, or right away
 // if they were found with older, weaker matching.
-function isStale(cached) {
+function isStale(cached, version) {
   if (cached.status !== 'none' && cached.status !== 'plain') return false;
-  if ((cached.payload && cached.payload.lookupVersion) !== LOOKUP_VERSION) return true;
+  if ((cached.payload && cached.payload.lookupVersion) !== version) return true;
   return Date.now() - cached.fetchedAt > NOT_FOUND_TTL_MS;
 }
 
 class LyricsService {
-  constructor(store) {
+  constructor(store, spotifyLyrics = null) {
     this.store = store;
+    this.spotifyLyrics = spotifyLyrics;
     this.inflight = new Map();
+  }
+
+  // Changes when matching improves or Spotify lyrics get switched on, so old misses are retried.
+  get version() {
+    return this.spotifyLyrics && this.spotifyLyrics.enabled ? `${LOOKUP_VERSION}+spotify` : LOOKUP_VERSION;
+  }
+
+  // LRCLIB first; Spotify's own lyrics only when LRCLIB has no synced version.
+  async lookup(trackId, meta) {
+    const record = await findRecord(meta);
+    let payload = buildPayload(trackId, record, 'lrclib');
+    let retryable = false;
+    if (payload.status !== 'synced' && this.spotifyLyrics && this.spotifyLyrics.enabled) {
+      try {
+        const sp = await this.spotifyLyrics.get(trackId);
+        if (sp && RANK[classify(sp)] > RANK[payload.status]) payload = buildPayload(trackId, sp, 'spotify');
+      } catch (err) {
+        console.warn('[lyrics] Spotify lyrics fallback failed:', err.message);
+        retryable = true;
+      }
+    }
+    payload.lookupVersion = this.version;
+    return { payload, retryable };
   }
 
   async get(trackId, resolveMeta) {
     const cached = await this.store.getLyrics(trackId);
-    if (cached && !isStale(cached)) {
+    if (cached && !isStale(cached, this.version)) {
       return { ...cached.payload, cached: true };
     }
     // Several clients asking for the same track share one lookup.
@@ -182,8 +207,11 @@ class LyricsService {
         if (meta.type === 'episode') {
           return { trackId, status: 'none', synced: false, lines: [], plainLyrics: null, message: 'Podcasts do not have lyrics.', source: null };
         }
-        const payload = buildPayload(trackId, await findRecord(meta));
-        await this.store.setLyrics(trackId, payload.status, payload);
+        const { payload, retryable } = await this.lookup(trackId, meta);
+        // Don't remember a miss caused by a temporary Spotify error.
+        if (!(retryable && payload.status !== 'synced')) {
+          await this.store.setLyrics(trackId, payload.status, payload);
+        }
         return payload;
       })().finally(() => this.inflight.delete(trackId));
       this.inflight.set(trackId, job);

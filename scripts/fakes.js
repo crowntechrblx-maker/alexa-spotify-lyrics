@@ -145,6 +145,33 @@ function startFakes(port = 0, opts = {}) {
       return res.end(t ? artSvg(t) : '');
     }
 
+    // ---- Spotify web player (lyrics fallback) ----
+    if (p === '/secrets.json') return json(res, 200, { 7: [1, 2, 3], 8: [10, 20, 30, 40] });
+    if (p === '/api/server-time') return json(res, 200, { serverTime: Math.floor(Date.now() / 1000) });
+    if (p === '/api/token') {
+      calls.webToken = (calls.webToken || 0) + 1;
+      const okCookie = /sp_dc=good-cookie/.test(req.headers.cookie || '');
+      const okTotp = /^\d{6}$/.test(url.searchParams.get('totp') || '') && url.searchParams.get('totpVer') === '8';
+      if (!okTotp) return json(res, 400, { error: 'bad totp' });
+      return json(res, 200, { accessToken: 'web-token', accessTokenExpirationTimestampMs: Date.now() + 3600000, isAnonymous: !okCookie });
+    }
+    const webLyrics = p.match(/^\/color-lyrics\/v2\/track\/(\w+)$/);
+    if (webLyrics) {
+      if (req.headers.authorization !== 'Bearer web-token') return json(res, 401, {});
+      const id = webLyrics[1];
+      if (id === 'spotifyOnlySynced0000a') {
+        return json(res, 200, { lyrics: { syncType: 'LINE_SYNCED', provider: 'MusixMatch', lines: [
+          { startTimeMs: '1500', words: 'Only Spotify has this one' },
+          { startTimeMs: '4000', words: '♪' },
+          { startTimeMs: '9000', words: 'Second line' },
+        ] } });
+      }
+      if (id === 'spotifyOnlyPlain00000a') {
+        return json(res, 200, { lyrics: { syncType: 'UNSYNCED', lines: [{ startTimeMs: '0', words: 'Plain one' }, { startTimeMs: '0', words: 'Plain two' }] } });
+      }
+      return json(res, 404, {});
+    }
+
     // ---- LRCLIB ----
     if (p === '/api/get' || p === '/api/search') {
       calls.lrclib++;

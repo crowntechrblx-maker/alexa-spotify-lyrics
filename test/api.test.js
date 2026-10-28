@@ -15,6 +15,7 @@ let base;
 let server;
 let store;
 let spotify;
+let spotifyLyrics;
 
 function memoryStore() {
   const lyrics = new Map();
@@ -46,11 +47,16 @@ test.before(async () => {
     ADMIN_KEY: ADMIN,
     SESSION_SECRET: 'test-session-secret-0123456789',
     DATABASE_URL: process.env.TEST_DATABASE_URL || '',
+    SPOTIFY_SP_DC: 'good-cookie',
+    SPOTIFY_WEB_URL: fakes.baseUrl,
+    SPOTIFY_SPCLIENT_URL: fakes.baseUrl,
+    SPOTIFY_SECRETS_URL: `${fakes.baseUrl}/secrets.json`,
   });
   const { createApp } = require('../src/server');
   const { createStore } = require('../src/store');
   const { SpotifyClient } = require('../src/spotify');
   const { LyricsService } = require('../src/lyrics');
+  const { SpotifyLyrics } = require('../src/spotifyLyrics');
 
   if (process.env.TEST_DATABASE_URL) {
     store = createStore();
@@ -60,7 +66,8 @@ test.before(async () => {
     store = memoryStore();
   }
   spotify = new SpotifyClient(store);
-  const app = createApp({ store, spotify, lyrics: new LyricsService(store) });
+  spotifyLyrics = new SpotifyLyrics();
+  const app = createApp({ store, spotify, lyrics: new LyricsService(store, spotifyLyrics), spotifyLyrics });
   await new Promise((r) => {
     server = app.listen(0, '127.0.0.1', r);
   });
@@ -300,4 +307,37 @@ test('lyrics: misses cached by older matching logic are looked up again', async 
   const body = await (await api('/api/lyrics?trackId=oldmiss')).json();
   assert.equal(body.status, 'synced');
   assert.equal(body.cached, false);
+});
+
+test('spotify lyrics fallback: synced lyrics when LRCLIB has none', async () => {
+  spotify.trackMeta.set('spotifyOnlySynced0000a', { title: 'Not On Lrclib', artists: ['Nobody'], album: 'X', durationMs: 120000, type: 'track' });
+  const body = await (await api('/api/lyrics?trackId=spotifyOnlySynced0000a')).json();
+  assert.equal(body.status, 'synced');
+  assert.equal(body.source, 'spotify');
+  assert.deepEqual(body.lines, [
+    { timeMs: 1500, text: 'Only Spotify has this one' },
+    { timeMs: 4000, text: '' },
+    { timeMs: 9000, text: 'Second line' },
+  ]);
+});
+
+test('spotify lyrics fallback: unsynced lyrics come back as plain', async () => {
+  spotify.trackMeta.set('spotifyOnlyPlain00000a', { title: 'Also Missing', artists: ['Nobody'], album: 'X', durationMs: 120000, type: 'track' });
+  const body = await (await api('/api/lyrics?trackId=spotifyOnlyPlain00000a')).json();
+  assert.equal(body.status, 'plain');
+  assert.equal(body.plainLyrics, 'Plain one\nPlain two');
+});
+
+test('spotify lyrics fallback: LRCLIB synced lyrics are used first', async () => {
+  const tokenCalls = fakes.calls.webToken || 0;
+  spotify.trackMeta.set('lrclibFirst0000000000a', { title: 'Neon Harbour', artists: ['The Placeholders'], album: 'Night Shift', durationMs: 64000, type: 'track' });
+  const body = await (await api('/api/lyrics?trackId=lrclibFirst0000000000a')).json();
+  assert.equal(body.source, 'lrclib');
+  assert.equal(fakes.calls.webToken || 0, tokenCalls);
+});
+
+test('setup check page reports the sp_dc cookie status', async () => {
+  assert.equal((await fetch(`${base}/auth/check?key=wrong`)).status, 403);
+  const html = await (await fetch(`${base}/auth/check?key=${ADMIN}`)).text();
+  assert.match(html, /The sp_dc cookie works/);
 });
