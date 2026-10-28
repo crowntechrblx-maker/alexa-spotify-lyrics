@@ -209,6 +209,9 @@ so you never need to log in on the Echo, or again at all unless you revoke acces
 Tips:
 - Tap the album art for play/pause/skip (the buttons hide after 5 seconds). Tap a lyric line to
   jump there.
+- **Full screen:** tap the album art and use **Full screen**, or double-tap any empty part of
+  the screen (also works on the clock screen). On a laptop, press **F**. Touch screens switch to
+  full screen by themselves on the first tap.
 - **Lyrics a bit early or late?** Tap the album art and use **Earlier** / **Later**. Each tap moves
   the lyrics 0.1 s, and the setting is saved on that screen.
 - If animations stutter on your Echo, add `&lite=1` to the link. That turns off the blur, masks

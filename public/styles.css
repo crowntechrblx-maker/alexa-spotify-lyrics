@@ -154,6 +154,9 @@ body.idle-mode .bg-shade { background: rgba(0, 0, 0, 0.62); }
   font-weight: 700;
   font-family: inherit;
 }
+.fs-row { margin-top: 1.6vh; }
+.fs-row.unsupported { display: none; }
+
 .sync-value {
   min-width: 15vh;
   text-align: center;

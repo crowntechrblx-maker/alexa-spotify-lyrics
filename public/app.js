@@ -1004,7 +1004,80 @@
     v.play().catch(function () {});
   }
 
-  // First touch: re-request (some browsers need a gesture) and go full screen on touch devices.
+  // ---------- Full screen ----------
+
+  var fsBtn = $('fs-btn');
+
+  function fullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function fullscreenSupported() {
+    var root = document.documentElement;
+    return Boolean(root.requestFullscreen || root.webkitRequestFullscreen) &&
+      document.fullscreenEnabled !== false && document.webkitFullscreenEnabled !== false;
+  }
+
+  function enterFullscreen(quiet) {
+    var root = document.documentElement;
+    var fn = root.requestFullscreen || root.webkitRequestFullscreen;
+    if (!fn || fullscreenElement()) return;
+    var fail = function () { if (!quiet) toast('This browser won\'t allow full screen'); };
+    try {
+      var p = fn.call(root);
+      if (p && p.catch) p.catch(fail);
+    } catch (e) { fail(); }
+  }
+
+  function toggleFullscreen() {
+    if (fullscreenElement()) {
+      var exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) {
+        var p = exit.call(document);
+        if (p && p.catch) p.catch(function () {});
+      }
+    } else {
+      enterFullscreen(false);
+    }
+  }
+
+  function updateFullscreenButton() {
+    fsBtn.textContent = fullscreenElement() ? 'Exit full screen' : 'Full screen';
+  }
+
+  if (!fullscreenSupported()) fsBtn.parentNode.classList.add('unsupported');
+  fsBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    showControls();
+    toggleFullscreen();
+  });
+  document.addEventListener('fullscreenchange', updateFullscreenButton);
+  document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
+
+  // Double-tap anywhere (except buttons, the art and lyric lines) toggles full screen.
+  var lastTap = { t: 0, x: 0, y: 0 };
+  document.addEventListener('pointerup', function (e) {
+    var node = e.target;
+    while (node && node !== document.body) {
+      if (node.tagName === 'BUTTON' || node.tagName === 'A' || node.tagName === 'INPUT' ||
+          node === el.artWrap || (node.classList && node.classList.contains('line'))) return;
+      node = node.parentNode;
+    }
+    var now = Date.now();
+    if (now - lastTap.t < 350 && Math.abs(e.clientX - lastTap.x) < 40 && Math.abs(e.clientY - lastTap.y) < 40) {
+      lastTap.t = 0;
+      toggleFullscreen();
+    } else {
+      lastTap = { t: now, x: e.clientX, y: e.clientY };
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) toggleFullscreen();
+  });
+
+  // First touch: re-request the wake lock (some browsers need a gesture) and
+  // go full screen automatically on touch screens like the Echo.
   var firstGesture = true;
   document.addEventListener('pointerdown', function () {
     requestWakeLock();
@@ -1012,14 +1085,7 @@
     if (!firstGesture) return;
     firstGesture = false;
     var coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-    var root = document.documentElement;
-    var fs = root.requestFullscreen || root.webkitRequestFullscreen;
-    if (coarse && fs && !document.fullscreenElement) {
-      try {
-        var p = fs.call(root);
-        if (p && p.catch) p.catch(function () {});
-      } catch (e) { /* not allowed */ }
-    }
+    if (coarse) enterFullscreen(true);
   }, { passive: true });
 
   document.addEventListener('visibilitychange', function () {
