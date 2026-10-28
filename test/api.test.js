@@ -27,6 +27,11 @@ function memoryStore() {
     async setRefreshToken(t) { refresh = t || null; },
     async getLyrics(id) { return lyrics.get(id) || null; },
     async setLyrics(id, status, payload) { lyrics.set(id, { status, payload, fetchedAt: Date.now() }); },
+    async clearMisses() {
+      let n = 0;
+      for (const [id, v] of lyrics) if (v.status === 'none' || v.status === 'plain') { lyrics.delete(id); n++; }
+      return n;
+    },
     async close() {},
   };
 }
@@ -340,4 +345,16 @@ test('setup check page reports the sp_dc cookie status', async () => {
   assert.equal((await fetch(`${base}/auth/check?key=wrong`)).status, 403);
   const html = await (await fetch(`${base}/auth/check?key=${ADMIN}`)).text();
   assert.match(html, /The sp_dc cookie works/);
+});
+
+test('check page lists recent lookups and can forget misses', async () => {
+  await store.setLyrics('missme', 'none', { trackId: 'missme', status: 'none', lines: [], lookupVersion: '2+spotify' });
+  await api('/api/lyrics?trackId=demo4');
+  const html = await (await fetch(`${base}/auth/check?key=${ADMIN}`)).text();
+  assert.match(html, /Recent lyrics lookups/);
+  assert.match(html, /LRCLIB is reachable/);
+  const res = await fetch(`${base}/auth/clear-misses?key=${ADMIN}`, { method: 'POST', redirect: 'manual' });
+  assert.equal(res.status, 303);
+  assert.equal(await store.getLyrics('missme'), null);
+  assert.equal((await fetch(`${base}/auth/clear-misses?key=nope`, { method: 'POST' })).status, 403);
 });

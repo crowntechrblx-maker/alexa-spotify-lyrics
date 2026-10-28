@@ -37,6 +37,7 @@ const TOKEN = 'demo-display-token-1234';
     async setRefreshToken() {},
     async getLyrics(id) { return lyricsCache.get(id) || null; },
     async setLyrics(id, status, payload) { lyricsCache.set(id, { status, payload, fetchedAt: Date.now() }); },
+    async clearMisses() { let n = 0; for (const [id, v] of lyricsCache) if (v.status !== 'synced') { lyricsCache.delete(id); n++; } return n; },
     async close() {},
   };
 

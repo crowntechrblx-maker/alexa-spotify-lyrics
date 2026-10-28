@@ -87,6 +87,11 @@ class PgStore {
     );
   }
 
+  async clearMisses() {
+    const { rowCount } = await this.pool.query("DELETE FROM lyrics_cache WHERE status IN ('none', 'plain')");
+    return rowCount;
+  }
+
   async close() {
     await this.pool.end();
   }
@@ -135,6 +140,17 @@ class MemoryStore {
     if (this.lyrics.size > LYRICS_MEMORY_LIMIT) {
       this.lyrics.delete(this.lyrics.keys().next().value);
     }
+  }
+
+  async clearMisses() {
+    let n = 0;
+    for (const [id, v] of this.lyrics) {
+      if (v.status === 'none' || v.status === 'plain') {
+        this.lyrics.delete(id);
+        n++;
+      }
+    }
+    return n;
   }
 
   async close() {}

@@ -7,7 +7,7 @@ const express = require('express');
 const { config, validate } = require('./config');
 const { createStore } = require('./store');
 const { SpotifyClient } = require('./spotify');
-const { LyricsService } = require('./lyrics');
+const { LyricsService, pingLrclib } = require('./lyrics');
 const { SpotifyLyrics } = require('./spotifyLyrics');
 
 const ART_HOSTS = /(^|\.)(scdn\.co|spotifycdn\.com)$/i;
@@ -181,12 +181,29 @@ function createApp({ store, spotify, lyrics, spotifyLyrics }) {
     const connected = await spotify.isConnected().catch(() => false);
     rows.push([connected, connected ? 'Spotify account connected.' : 'Spotify account not connected. Use /auth/login?key=…']);
     rows.push([store.kind === 'postgres', store.kind === 'postgres' ? 'Using the PostgreSQL database.' : `Using the ${store.kind} store (set DATABASE_URL to keep your login across restarts).`]);
+    const ping = await pingLrclib();
+    rows.push([ping.ok, ping.message]);
     if (spotifyLyrics) {
       const t = await spotifyLyrics.selfTest();
       rows.push([t.ok, `Spotify lyrics: ${t.message}`]);
     }
     const list = rows.map(([ok, text]) => `<li>${ok ? '✅' : '⚠️'} ${escapeHtml(text)}</li>`).join('');
-    res.send(page('Setup check', `<h1>Setup check</h1><ul style="list-style:none;padding:0;line-height:2">${list}</ul>`));
+
+    const recent = (lyrics.recent || [])
+      .map((r) => `<li style="margin-bottom:14px"><b>${escapeHtml(r.title || r.trackId)}</b>${r.artist ? ` — ${escapeHtml(r.artist)}` : ''}
+<br>Result: <b>${escapeHtml(r.result)}</b><br><small style="color:#999">${r.log.map(escapeHtml).join('<br>')}</small></li>`)
+      .join('');
+    const key = encodeURIComponent(String(req.query.key));
+    const cleared = req.query.cleared !== undefined ? `<p>✅ Forgot ${Number(req.query.cleared) || 0} remembered misses. They'll be searched again next time they play.</p>` : '';
+    res.send(page('Setup check', `<h1>Setup check</h1><ul style="list-style:none;padding:0;line-height:2">${list}</ul>
+<h2>Recent lyrics lookups</h2>${recent ? `<ul style="list-style:none;padding:0">${recent}</ul>` : '<p>None since the server started. Play a song and refresh this page.</p>'}
+${cleared}<form method="post" action="/auth/clear-misses?key=${key}"><button style="padding:10px 18px;border-radius:20px;border:0;background:#1ed760;font-weight:700">Search again for songs that had no lyrics</button></form>`));
+  });
+
+  app.post('/auth/clear-misses', async (req, res) => {
+    if (!config.adminKey || !safeEqual(String(req.query.key || ''), config.adminKey)) return res.status(403).end();
+    const n = await lyrics.clearMisses();
+    res.redirect(303, `/auth/check?key=${encodeURIComponent(String(req.query.key))}&cleared=${n}`);
   });
 
   // ---- Pairing (public; the approve step below needs the token) ------------

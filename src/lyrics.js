@@ -87,7 +87,13 @@ function bestSearchResult(results, durationS) {
   return best;
 }
 
-async function findRecord(meta) {
+function describe(result) {
+  if (result === null) return 'not found';
+  if (Array.isArray(result)) return `${result.length} result(s)`;
+  return classify(result);
+}
+
+async function findRecord(meta, log = []) {
   const artists = (meta.artists || []).filter(Boolean);
   const artist = artists[0] || '';
   const durationS = meta.durationMs ? Math.round(meta.durationMs / 1000) : 0;
@@ -111,19 +117,24 @@ async function findRecord(meta) {
     tried.add(key);
     lookups++;
     let results = await lrclib('/api/search', params);
+    const found = describe(results);
     if (loose && Array.isArray(results)) results = results.filter(plausible);
-    return consider(bestSearchResult(results, durationS));
+    const pick = bestSearchResult(results, durationS);
+    log.push(`LRCLIB search ${JSON.stringify(params)}: ${found}, best match ${pick ? classify(pick) : 'none'}`);
+    return consider(pick);
   }
 
   // 1. Exact match on title, artist, album and duration.
   if (meta.title && artist && meta.album && durationS) {
     lookups++;
-    if (consider(await lrclib('/api/get', {
+    const exact = await lrclib('/api/get', {
       track_name: meta.title,
       artist_name: artist,
       album_name: meta.album,
       duration: String(durationS),
-    }))) return record;
+    });
+    log.push(`LRCLIB exact match: ${describe(exact)}`);
+    if (consider(exact)) return record;
   }
 
   // 2. Search by title + main artist, trying simpler forms of the title.
@@ -169,6 +180,12 @@ class LyricsService {
     this.store = store;
     this.spotifyLyrics = spotifyLyrics;
     this.inflight = new Map();
+    this.recent = []; // last lookups, shown on /auth/check
+  }
+
+  remember(entry) {
+    this.recent.unshift({ at: new Date().toISOString(), ...entry });
+    if (this.recent.length > 25) this.recent.pop();
   }
 
   // Changes when matching improves or Spotify lyrics get switched on, so old misses are retried.
@@ -178,25 +195,50 @@ class LyricsService {
 
   // LRCLIB first; Spotify's own lyrics only when LRCLIB has no synced version.
   async lookup(trackId, meta) {
-    const record = await findRecord(meta);
+    const log = [];
+    let record = null;
+    try {
+      record = await findRecord(meta, log);
+    } catch (err) {
+      log.push(`LRCLIB error: ${err.message}`);
+      if (!(this.spotifyLyrics && this.spotifyLyrics.enabled)) {
+        this.remember({ trackId, title: meta.title, artist: meta.artists.join(', '), result: 'error', log });
+        throw err;
+      }
+    }
     let payload = buildPayload(trackId, record, 'lrclib');
-    let retryable = false;
-    if (payload.status !== 'synced' && this.spotifyLyrics && this.spotifyLyrics.enabled) {
-      try {
-        const sp = await this.spotifyLyrics.get(trackId);
-        if (sp && RANK[classify(sp)] > RANK[payload.status]) payload = buildPayload(trackId, sp, 'spotify');
-      } catch (err) {
-        console.warn('[lyrics] Spotify lyrics fallback failed:', err.message);
-        retryable = true;
+    let retryable = log.some((l) => l.startsWith('LRCLIB error'));
+    if (payload.status !== 'synced') {
+      if (!this.spotifyLyrics || !this.spotifyLyrics.enabled) {
+        log.push('Spotify lyrics: off (SPOTIFY_SP_DC not set)');
+      } else {
+        try {
+          const sp = await this.spotifyLyrics.get(trackId);
+          log.push(`Spotify lyrics: ${sp ? classify(sp) : 'none for this track'}`);
+          if (sp && RANK[classify(sp)] > RANK[payload.status]) payload = buildPayload(trackId, sp, 'spotify');
+        } catch (err) {
+          console.warn('[lyrics] Spotify lyrics fallback failed:', err.message);
+          log.push(`Spotify lyrics error: ${err.message}`);
+          retryable = true;
+        }
       }
     }
     payload.lookupVersion = this.version;
+    this.remember({ trackId, title: meta.title, artist: meta.artists.join(', '), result: `${payload.status} (${payload.source || 'no source'})`, log });
     return { payload, retryable };
+  }
+
+  // Forget cached misses so they're looked up again on the next play.
+  async clearMisses() {
+    return this.store.clearMisses();
   }
 
   async get(trackId, resolveMeta) {
     const cached = await this.store.getLyrics(trackId);
     if (cached && !isStale(cached, this.version)) {
+      if (cached.status === 'none') {
+        this.remember({ trackId, title: '', artist: '', result: 'none (remembered miss)', log: [`No lyrics found when last searched on ${new Date(cached.fetchedAt).toISOString()}`] });
+      }
       return { ...cached.payload, cached: true };
     }
     // Several clients asking for the same track share one lookup.
@@ -220,4 +262,14 @@ class LyricsService {
   }
 }
 
-module.exports = { LyricsService, cleanTitle, baseTitle, norm, bestSearchResult, buildPayload };
+// Quick reachability check for /auth/check.
+async function pingLrclib() {
+  try {
+    await lrclib('/api/search', { q: 'hello adele' });
+    return { ok: true, message: 'LRCLIB is reachable.' };
+  } catch (err) {
+    return { ok: false, message: `LRCLIB is not reachable from the server: ${err.message}` };
+  }
+}
+
+module.exports = { LyricsService, pingLrclib, cleanTitle, baseTitle, norm, bestSearchResult, buildPayload };
