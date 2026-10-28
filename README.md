@@ -1,0 +1,266 @@
+# Spotify Lyrics for Echo Show
+
+A self-hosted, full-screen **"Now Playing" synced-lyrics display** for Spotify, built for the
+**Echo Show 8 (2nd gen)** Silk browser (1280×800 touch screen). It also works fine in a laptop
+browser.
+
+- Album art, title, artist and a progress bar on the left; lyrics on the right.
+- **Spicy Lyrics–style lyrics:** each word fills from dim to bright as it's sung, the current word
+  lifts and glows slightly, lines blur more the further they are from the current one, and
+  interludes show three filling, breathing dots.
+- **Tap a lyric line** to jump the song to that line.
+- Animated, blurred background made from the album art's colours.
+- **Tap the album art** for play/pause/previous/next (needs Spotify Premium).
+- Idle clock screen with the last played artwork when nothing is playing.
+- Lyrics come from [LRCLIB](https://lrclib.net) (free, no key needed) and are cached in PostgreSQL.
+
+> **How the timing works:** the page follows whatever is playing on your Spotify account, on any
+> device. It checks Spotify every 3 seconds, keeps a smooth local clock in between, and corrects
+> any drift on each check. LRCLIB lyrics are usually **line-timed**, so the karaoke sweep across
+> the words is spread across each line's time by word length. When LRCLIB has real word
+> timings (enhanced LRC), those are used instead.
+
+---
+
+## Contents
+
+1. [Create the Spotify developer app](#1-create-the-spotify-developer-app)
+2. [Run it locally](#2-run-it-locally)
+3. [Deploy to Render (with Postgres and your own subdomain)](#3-deploy-to-render)
+4. [Log in to Spotify once](#4-log-in-to-spotify-once)
+5. [Put it on the Echo Show](#5-put-it-on-the-echo-show)
+6. [Reference: API, settings, troubleshooting](#reference)
+
+---
+
+## 1. Create the Spotify developer app
+
+1. Go to <https://developer.spotify.com/dashboard> and log in with your normal Spotify account.
+2. Click **Create app**.
+   - **App name:** anything, e.g. `Echo Lyrics`
+   - **App description:** anything
+   - **Redirect URIs:** add **both** of these (press *Add* after each):
+     - `http://127.0.0.1:3000/auth/callback` (for running on your computer)
+     - `https://lyrics.example.com/auth/callback`, using your real domain from step 3. You can
+       add this later. If you don't use a custom domain, use
+       `https://YOUR-SERVICE.onrender.com/auth/callback`.
+   - Under *Which API/SDKs are you planning to use?* tick **Web API**.
+3. Accept the terms and click **Save**.
+4. Open the app's **Settings**. Copy the **Client ID**, then click **View client secret** and copy
+   the **Client secret**. You'll need both shortly.
+
+Notes:
+- Spotify no longer accepts `localhost` in redirect URIs. Use `127.0.0.1` exactly as above.
+- New apps start in *Development mode*, which is fine for a single user (you). If your dashboard
+  has a **User Management** tab, add your own Spotify account's email address there.
+- The redirect URI must match **exactly**, including `https`, with no trailing slash.
+
+## 2. Run it locally
+
+You need [Node.js](https://nodejs.org) 20 or newer.
+
+```bash
+git clone https://github.com/crowntechrblx-maker/alexa-spotify-lyrics.git
+```
+
+```bash
+cd alexa-spotify-lyrics
+```
+
+```bash
+npm install
+```
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` in a text editor and fill it in:
+
+| Variable | What to put |
+| --- | --- |
+| `SPOTIFY_CLIENT_ID` | From step 1 |
+| `SPOTIFY_CLIENT_SECRET` | From step 1 |
+| `SPOTIFY_REDIRECT_URI` | `http://127.0.0.1:3000/auth/callback` |
+| `DATABASE_URL` | Leave empty locally (an in-memory cache is used) |
+| `SESSION_SECRET`, `ADMIN_KEY`, `DISPLAY_TOKEN` | A different long random string for each |
+
+To make a random string, run this command and copy the result. Run it once per variable.
+
+```bash
+node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
+```
+
+Start the server:
+
+```bash
+npm start
+```
+
+Then, in your browser:
+
+1. Open `http://127.0.0.1:3000/auth/login?key=YOUR_ADMIN_KEY` and approve the Spotify screen.
+2. The success page shows your display link, `http://127.0.0.1:3000/?t=YOUR_DISPLAY_TOKEN`.
+   Open it and play something on Spotify.
+
+**Just want to look at it first?** `npm run demo` runs the display against a built-in fake
+Spotify with placeholder songs (no account needed). Open the link it prints.
+
+**Tests:** `npm test`. To also test against PostgreSQL, set `TEST_DATABASE_URL` first.
+
+## 3. Deploy to Render
+
+[Render](https://render.com) runs the server and the database. The included `render.yaml` sets
+everything up.
+
+### 3a. Create the services
+
+1. Push this project to your GitHub account (it already is if you're reading this there).
+2. In the Render dashboard click **New → Blueprint** and pick this repository.
+3. Render reads `render.yaml` and shows a web service (`spotify-lyrics`) and a PostgreSQL
+   database (`spotify-lyrics-db`). It asks for the values it can't generate:
+   - `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`: from step 1.
+   - `SPOTIFY_REDIRECT_URI`: `https://lyrics.example.com/auth/callback` with your own domain. If
+     you're skipping the custom domain, use `https://spotify-lyrics-XXXX.onrender.com/auth/callback`;
+     you'll see the exact `onrender.com` address after the first deploy, and you can edit this
+     value then.
+4. Click **Apply**. `SESSION_SECRET`, `ADMIN_KEY` and `DISPLAY_TOKEN` are generated for you, and
+   `DATABASE_URL` is wired to the new database automatically.
+5. When the deploy finishes, open the service → **Environment** to see your generated
+   `ADMIN_KEY` and `DISPLAY_TOKEN`. You'll need them in steps 4 and 5.
+
+About plans: the blueprint uses Render's **free** plans. A free web service goes to sleep when
+nothing is using it, and wakes up (taking about a minute) when the Echo next loads the page. While
+the display is open it polls constantly, so it stays awake. Render's free PostgreSQL databases
+currently **expire after 30 days**. For something you'll leave running, change the database plan
+to `basic-256mb` (a few dollars a month) in `render.yaml` or the dashboard. If the database is
+ever replaced, the only effect is that you log in once more (step 4); the lyrics cache simply
+refills.
+
+### 3b. Add a custom subdomain (optional)
+
+Example: `lyrics.example.com`.
+
+1. In Render, open the web service → **Settings → Custom Domains → Add Custom Domain** and enter
+   `lyrics.example.com`.
+2. Render shows a DNS record to create. At your domain registrar or DNS provider (Cloudflare,
+   Namecheap, GoDaddy…), add a **CNAME** record:
+   - **Name/Host:** `lyrics`
+   - **Value/Target:** your service's `something.onrender.com` address, as shown by Render.
+   - If you use Cloudflare, set the record to **DNS only** (grey cloud) until Render verifies it.
+3. Back in Render, click **Verify**. Render issues the HTTPS certificate automatically, which can
+   take a few minutes.
+4. Make sure `https://lyrics.example.com/auth/callback` is both:
+   - in the Spotify dashboard's Redirect URIs (step 1), and
+   - the value of `SPOTIFY_REDIRECT_URI` in Render → Environment. Saving there redeploys.
+
+## 4. Log in to Spotify once
+
+On your computer or phone (anything with a keyboard), open:
+
+```
+https://lyrics.example.com/auth/login?key=YOUR_ADMIN_KEY
+```
+
+Approve the Spotify screen. You'll land on a **"Spotify connected"** page showing your display
+link. The refresh token is now stored in Postgres, and the server renews access tokens by itself,
+so you never need to log in on the Echo, or again at all unless you revoke access.
+
+## 5. Put it on the Echo Show
+
+1. Say **"Alexa, open Silk"** (or "Alexa, open Silk browser").
+2. Tap the address bar and type your display link:
+   `https://lyrics.example.com/?t=YOUR_DISPLAY_TOKEN`
+   - You only need to type the token once. The page remembers it, so plain
+     `https://lyrics.example.com/` works on that Echo afterwards.
+3. **Bookmark it:** open Silk's menu (the **⋮** or bookmark icon next to the address bar) and add
+   a bookmark. Next time, say "Alexa, open Silk" and tap the bookmark.
+4. Tap the screen once. On touch screens the page asks to go **full screen** on first touch, which
+   also lets it ask the browser to keep the screen on.
+5. **Keep the screen on as long as possible.** The page uses the Wake Lock API, plus a tiny
+   invisible video as a fallback, to stop the browser from sleeping. The Echo's own settings still
+   apply, and menu names differ between software versions:
+   - Swipe down from the top of the screen → **Settings → Display**, and set any screen
+     timeout or sleep option to its maximum (or *Never*, if offered).
+   - Turn off anything that dims or rotates the screen when idle, such as *Adaptive Brightness* or
+     night dimming, if you want it bright.
+   - Some Echo software versions return to the Home screen after a while regardless. If that
+     happens, reopen your Silk bookmark. Starting music from the Echo itself tends to keep Silk
+     open longer.
+
+Tips:
+- Tap the album art for play/pause/skip (the buttons hide after 5 seconds). Tap a lyric line to
+  jump there.
+- If animations stutter on your Echo, add `&lite=1` to the link. That turns off the blur, masks
+  and glow and stops the background from drifting.
+
+---
+
+## Reference
+
+### Project layout
+
+```
+src/
+  server.js    Express app: OAuth routes, API routes, static files
+  spotify.js   Token refresh, throttled now-playing, controls
+  lyrics.js    LRCLIB lookup (get → search fallback) + caching
+  lrc.js       LRC parser (incl. enhanced word timings)
+  store.js     PostgreSQL store, with in-memory fallback
+  config.js    Environment variables
+public/        The display page (plain HTML/CSS/JS, no build step)
+scripts/       Demo mode and fake Spotify/LRCLIB used by tests
+test/          node:test suites
+render.yaml    Render blueprint
+```
+
+### Environment variables
+
+| Name | Required | Purpose |
+| --- | --- | --- |
+| `SPOTIFY_CLIENT_ID` | yes | Spotify app client ID |
+| `SPOTIFY_CLIENT_SECRET` | yes | Spotify app client secret |
+| `SPOTIFY_REDIRECT_URI` | yes | `https://your-host/auth/callback`; must match the dashboard |
+| `DATABASE_URL` | no | PostgreSQL connection string; in-memory if empty |
+| `SESSION_SECRET` | yes | Signs the OAuth `state` value |
+| `ADMIN_KEY` | yes | Required as `?key=` on `/auth/login` |
+| `DISPLAY_TOKEN` | yes | Required as `?t=` on the page and for every `/api` call |
+| `DATABASE_SSL` | no | `true` or `false` to override automatic SSL detection |
+| `PORT` | no | Defaults to 3000 (Render sets it automatically) |
+
+### API
+
+Every `/api` route needs the display token, either as `?t=TOKEN` or as an `X-Display-Token`
+header.
+
+| Route | Description |
+| --- | --- |
+| `GET /api/now-playing` | `{ isPlaying, type, trackId, title, artists, album, albumArtUrl, durationMs, progressMs, serverTimestamp, lastPlayed }`. `type` is `track`, `episode`, `ad` or `none` (nothing playing). |
+| `GET /api/lyrics?trackId=…` | `{ status: synced \| plain \| instrumental \| none, synced, wordSynced, lines: [{ timeMs, text, words? }], plainLyrics, message, cached }` |
+| `POST /api/control/play\|pause\|next\|previous` | Playback control (Premium). `403 premium_required` or `404 no_active_device` explain failures. |
+| `POST /api/control/seek?positionMs=…` | Jump to a position (used by tap-a-line). |
+| `GET /api/art?url=…` | Same-origin copy of Spotify album art, used only if colour extraction is blocked by CORS. |
+| `GET /auth/login?key=ADMIN_KEY` | Starts Spotify login. |
+| `GET /healthz` | Health check for Render. |
+
+**Rate limiting:** however many screens are polling, the server calls Spotify's
+currently-playing endpoint at most once every 2 seconds. In between, it serves the last snapshot
+with the progress moved forward. If Spotify returns `429`, the server waits for the time in its
+`Retry-After` header and keeps serving the last snapshot.
+
+**Lyrics cache:** results are stored per Spotify track ID, including "no lyrics found". Misses are
+retried after 3 days in case someone adds the lyrics to LRCLIB.
+
+### Troubleshooting
+
+- **"Spotify isn't connected yet"**: do step 4. If you revoked the app's access in your Spotify
+  account settings, do step 4 again.
+- **`INVALID_CLIENT: Invalid redirect URI`** on the Spotify screen: `SPOTIFY_REDIRECT_URI` and
+  the dashboard entry differ. Check `http`/`https`, the domain and the path.
+- **"Login link expired or invalid"**: start from `/auth/login?key=…` again, in the same browser,
+  within 10 minutes.
+- **"Invalid display token"**: the `?t=` value doesn't match `DISPLAY_TOKEN`.
+- **Controls show "needs Spotify Premium"**: Spotify only allows playback control for Premium
+  accounts. Lyrics still work without Premium.
+- **Lyrics slightly early or late**: change `LYRIC_LEAD_MS` at the top of `public/app.js`
+  (default 200 ms early).

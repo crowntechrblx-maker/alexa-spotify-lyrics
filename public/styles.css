@@ -1,0 +1,409 @@
+/*
+ * Tuned for the Echo Show 8 (1280x800, Silk/Chromium on modest hardware).
+ * Only transform and opacity are animated. Sizes are in vh so the layout
+ * scales to a laptop window too. Avoids newer CSS (gap in flex, inset,
+ * aspect-ratio) that older Silk builds may not support.
+ */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", "Amazon Ember", Roboto, "Segoe UI", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: default;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- Background ---------- */
+
+#bg {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  overflow: hidden;
+  z-index: 0;
+  background: #101014;
+}
+
+.bg-layer {
+  position: absolute;
+  top: -25%; left: -25%;
+  width: 150%; height: 150%;
+  opacity: 0;
+  transition: opacity 1.4s ease;
+  will-change: transform, opacity;
+  animation: drift 48s ease-in-out infinite alternate;
+}
+.bg-layer.visible { opacity: 1; }
+.bg-layer:nth-child(2) { animation-duration: 56s; animation-direction: alternate-reverse; }
+
+@keyframes drift {
+  0%   { transform: translate3d(-4%, -3%, 0) rotate(0deg) scale(1.05); }
+  50%  { transform: translate3d(3%, 2%, 0) rotate(8deg) scale(1.15); }
+  100% { transform: translate3d(-2%, 4%, 0) rotate(-6deg) scale(1.08); }
+}
+
+.bg-shade {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse at 30% 50%, rgba(0, 0, 0, 0.05) 0%, rgba(0, 0, 0, 0.45) 100%),
+    rgba(0, 0, 0, 0.26);
+}
+
+body.idle-mode .bg-shade { background: rgba(0, 0, 0, 0.62); }
+
+/* ---------- Player layout ---------- */
+
+#player {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 1;
+  display: flex;
+  align-items: stretch;
+  padding: 0 4vw 0 5vw;
+}
+
+.left {
+  flex: 0 0 auto;
+  width: 54vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  margin-right: 5vw;
+}
+
+.art-wrap {
+  position: relative;
+  width: 54vh;
+  height: 54vh;
+  border-radius: 1.6vh;
+  background: linear-gradient(135deg, #2a2a33, #15151a);
+  box-shadow: 0 2.4vh 6vh rgba(0, 0, 0, 0.55), 0 0.5vh 1.4vh rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  cursor: pointer;
+  /* Keeps the rounded clip cheap when children change opacity. */
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+
+.art {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.9s ease;
+}
+.art.visible { opacity: 1; }
+
+.controls {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.controls.show { opacity: 1; pointer-events: auto; }
+
+.controls button {
+  width: 9vh; height: 9vh;
+  margin: 0 1.4vh;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+.controls button:active { transform: scale(0.9); background: rgba(255, 255, 255, 0.3); }
+.controls button.big { width: 12vh; height: 12vh; background: rgba(255, 255, 255, 0.92); color: #000; }
+.controls svg { width: 45%; height: 45%; fill: currentColor; }
+.controls .icon-pause { display: none; }
+.controls.playing .icon-pause { display: block; }
+.controls.playing .icon-play { display: none; }
+
+.meta {
+  margin-top: 3.4vh;
+  transition: opacity 0.4s ease;
+}
+
+.title {
+  font-size: 3.6vh;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.artist {
+  margin-top: 0.6vh;
+  font-size: 2.6vh;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.68);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress { margin-top: 2.6vh; }
+
+.progress-track {
+  height: 0.6vh;
+  min-height: 3px;
+  border-radius: 1vh;
+  background: rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+}
+
+.progress-fill {
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 1vh;
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  will-change: transform;
+}
+
+.times {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1vh;
+  font-size: 1.7vh;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Lyrics ---------- */
+
+.right {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 82%, transparent 100%);
+  transition: opacity 0.4s ease;
+}
+
+.lyrics {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  padding-right: 2vw;
+  will-change: transform;
+  transition: transform 0.7s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.lyrics.no-anim { transition: none; }
+
+.line {
+  font-size: 5.2vh;
+  font-weight: 800;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  padding: 1.3vh 0;
+  color: #fff;
+  opacity: 0.32;
+  transform: scale(0.94);
+  transform-origin: 0 50%;
+  transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.22, 0.61, 0.36, 1);
+  word-wrap: break-word;
+  cursor: pointer;
+}
+.line.past { opacity: 0.26; }
+.line.near { opacity: 0.4; }
+.line.active { opacity: 1; transform: scale(1); }
+.line.blur1 { filter: blur(0.8px); }
+.line.blur2 { filter: blur(1.5px); }
+.line.blur3 { filter: blur(2.2px); }
+
+/* Words: on the active line each word is a text-clipped gradient whose
+   fill edge sweeps across as it's sung (driven by background-position). */
+.w { display: inline-block; }
+.line.active .w {
+  background-image: linear-gradient(90deg, #fff 47%, rgba(255, 255, 255, 0.36) 53%);
+  background-size: 300% 100%;
+  background-repeat: no-repeat;
+  background-position: 80% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  transition: transform 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.line.active .w.cur {
+  transform: translateY(-0.045em);
+  text-shadow: 0 0 0.3em rgba(255, 255, 255, 0.16);
+}
+.line.active .w.sung { transform: translateY(-0.025em); }
+
+/* Interludes: three dots that fill in turn and gently breathe. */
+.line.gap { cursor: default; }
+.dots { display: inline-block; padding: 1vh 0; transition: transform 0.5s ease, opacity 0.5s ease; }
+.dots i {
+  display: inline-block;
+  width: 1.7vh;
+  height: 1.7vh;
+  margin-right: 1.3vh;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.25;
+}
+.line.gap.active .dots { animation: breathe 2.4s ease-in-out infinite; }
+.line.gap.ending .dots { opacity: 0; transform: scale(0.4); animation: none; }
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}
+
+/* Plain (unsynced) lyrics: smaller, evenly lit, scrolled with the song. */
+.lyrics.plain { transition: none; }
+.lyrics.plain .line {
+  font-size: 3.6vh;
+  font-weight: 700;
+  padding: 0.8vh 0;
+  opacity: 0.72;
+  transform: none;
+  transition: none;
+}
+.plain-note {
+  font-size: 1.8vh;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  padding-bottom: 2vh;
+}
+
+.lyrics-message {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  font-size: 6vh;
+  font-weight: 800;
+  line-height: 1.15;
+  color: rgba(255, 255, 255, 0.9);
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  pointer-events: none;
+}
+.lyrics-message.show { opacity: 1; }
+.lyrics-message small {
+  display: block;
+  margin-top: 1.6vh;
+  font-size: 2.4vh;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.fading { opacity: 0 !important; }
+
+/* Lite mode (?lite=1): no blur or masks for very slow devices. */
+body.lite .line.blur1, body.lite .line.blur2, body.lite .line.blur3 { filter: none; }
+body.lite .line.active .w.cur { text-shadow: none; }
+body.lite .right { -webkit-mask-image: none; mask-image: none; }
+body.lite .bg-layer { animation: none; }
+
+/* ---------- Idle ---------- */
+
+.idle {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6vw;
+}
+
+.idle-art {
+  width: 50vh;
+  height: 50vh;
+  border-radius: 1.6vh;
+  object-fit: cover;
+  opacity: 0.4;
+  margin-right: 7vw;
+  box-shadow: 0 2.4vh 6vh rgba(0, 0, 0, 0.5);
+}
+.idle-art.empty { display: none; }
+
+.clock {
+  font-size: 22vh;
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.92);
+}
+.date {
+  margin-top: 1.5vh;
+  font-size: 3.6vh;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+}
+.idle-last {
+  margin-top: 4vh;
+  font-size: 2.2vh;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+  max-width: 50vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Notices & toast ---------- */
+
+.notice {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 10vw;
+}
+.notice h1 { font-size: 5vh; font-weight: 800; }
+.notice p { margin-top: 2vh; font-size: 2.6vh; color: rgba(255, 255, 255, 0.7); line-height: 1.5; }
+.notice code { background: rgba(255, 255, 255, 0.12); padding: 0.2vh 0.8vh; border-radius: 0.6vh; }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 5vh;
+  z-index: 3;
+  max-width: 80vw;
+  padding: 1.6vh 3vh;
+  border-radius: 4vh;
+  background: rgba(20, 20, 24, 0.92);
+  font-size: 2.2vh;
+  font-weight: 600;
+  opacity: 0;
+  transform: translate(-50%, 2vh);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }

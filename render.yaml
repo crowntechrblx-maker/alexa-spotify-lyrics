@@ -1,0 +1,36 @@
+# One-click deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+services:
+  - type: web
+    name: spotify-lyrics
+    runtime: node
+    # "free" sleeps when nothing is polling it; "starter" stays awake.
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: SPOTIFY_REDIRECT_URI
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: spotify-lyrics-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: DISPLAY_TOKEN
+        generateValue: true
+
+databases:
+  - name: spotify-lyrics-db
+    # Render's free Postgres expires after 30 days; "basic-256mb" doesn't.
+    plan: free
+    databaseName: spotify_lyrics
+    user: spotify_lyrics

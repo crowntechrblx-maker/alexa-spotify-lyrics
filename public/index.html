@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#000000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Now Playing</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Background: two tiny canvases scaled up (cheap "blur"), crossfaded on track change. -->
+  <div id="bg" aria-hidden="true">
+    <canvas class="bg-layer" width="48" height="30"></canvas>
+    <canvas class="bg-layer" width="48" height="30"></canvas>
+    <div class="bg-shade"></div>
+  </div>
+
+  <main id="player" class="hidden">
+    <section class="left">
+      <div id="art-wrap" class="art-wrap" role="button" aria-label="Show playback controls">
+        <img class="art" alt="" draggable="false">
+        <img class="art" alt="" draggable="false">
+        <div id="controls" class="controls" aria-hidden="true">
+          <button type="button" data-action="previous" aria-label="Previous">
+            <svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
+          </button>
+          <button type="button" data-action="toggle" class="big" aria-label="Play or pause">
+            <svg class="icon-play" viewBox="0 0 24 24"><path d="M7 4.5v15L20 12z"/></svg>
+            <svg class="icon-pause" viewBox="0 0 24 24"><path d="M6 4h4.5v16H6zM13.5 4H18v16h-4.5z"/></svg>
+          </button>
+          <button type="button" data-action="next" aria-label="Next">
+            <svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div id="meta" class="meta">
+        <h1 id="title" class="title"></h1>
+        <p id="artist" class="artist"></p>
+        <div class="progress">
+          <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+          <div class="times"><span id="elapsed">0:00</span><span id="total">0:00</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="lyrics-panel" class="right">
+      <div id="lyrics" class="lyrics"></div>
+      <div id="lyrics-message" class="lyrics-message"></div>
+    </section>
+  </main>
+
+  <section id="idle" class="idle hidden">
+    <img id="idle-art" class="idle-art" alt="">
+    <div class="idle-text">
+      <div id="clock" class="clock">--:--</div>
+      <div id="date" class="date"></div>
+      <div id="idle-last" class="idle-last"></div>
+    </div>
+  </section>
+
+  <section id="notice" class="notice hidden">
+    <h1 id="notice-title"></h1>
+    <p id="notice-body"></p>
+  </section>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
