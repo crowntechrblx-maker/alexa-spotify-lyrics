@@ -281,3 +281,23 @@ test('pairing: unknown ids are expired and the pair page is served', async () =>
   assert.equal(page.status, 200);
   assert.match(await page.text(), /Link a screen/);
 });
+
+test('lyrics: messy titles still match after cleaning', async () => {
+  spotify.trackMeta.set('messy1', {
+    title: 'Neon Harbour (feat. Someone) - 2019 Remaster',
+    artists: ['The Placeholders', 'Someone'],
+    album: 'Deluxe Edition',
+    durationMs: 64500,
+    type: 'track',
+  });
+  const body = await (await api('/api/lyrics?trackId=messy1')).json();
+  assert.equal(body.status, 'synced');
+});
+
+test('lyrics: misses cached by older matching logic are looked up again', async () => {
+  spotify.trackMeta.set('oldmiss', { title: 'Neon Harbour', artists: ['The Placeholders'], album: 'Night Shift', durationMs: 64000, type: 'track' });
+  await store.setLyrics('oldmiss', 'none', { trackId: 'oldmiss', status: 'none', lines: [] });
+  const body = await (await api('/api/lyrics?trackId=oldmiss')).json();
+  assert.equal(body.status, 'synced');
+  assert.equal(body.cached, false);
+});

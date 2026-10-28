@@ -8,6 +8,9 @@ const { parseLrc } = require('./lrc');
 const USER_AGENT = 'alexa-spotify-lyrics/1.0 (self-hosted now-playing display)';
 const NOT_FOUND_TTL_MS = 3 * 24 * 60 * 60 * 1000; // re-check misses after 3 days
 const DURATION_TOLERANCE_S = 4;
+const MAX_LOOKUPS = 8; // LRCLIB requests per track, at most
+// Bump when the matching logic improves so cached misses get another try.
+const LOOKUP_VERSION = 2;
 
 const MESSAGES = {
   synced: 'Synced lyrics',
@@ -22,6 +25,28 @@ function cleanTitle(title) {
     .replace(/\s*[([].*?(feat\.|ft\.|with |remaster|live|version|edit|mono|stereo|demo|mix).*?[)\]]/gi, '')
     .replace(/\s+-\s+.*(remaster|live|version|edit|mono|stereo|demo|mix|recorded|from ).*$/i, '')
     .trim();
+}
+
+// "Beyoncé & JAY-Z" -> "beyonce and jay z"
+function norm(s) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9\u0400-\uffff]+/g, ' ')
+    .trim();
+}
+
+// Just the core title: "Song (Live at X) - 2011 Remaster" -> "Song"
+function baseTitle(title) {
+  return title.split(/\s+-\s+|\s*[([]/)[0].trim();
+}
+
+function similar(a, b) {
+  const x = norm(a);
+  const y = norm(b);
+  return Boolean(x && y && (x === y || x.includes(y) || y.includes(x)));
 }
 
 async function lrclib(path, params) {
@@ -62,29 +87,55 @@ function bestSearchResult(results, durationS) {
 }
 
 async function findRecord(meta) {
-  const artist = meta.artists[0] || '';
+  const artists = (meta.artists || []).filter(Boolean);
+  const artist = artists[0] || '';
   const durationS = meta.durationMs ? Math.round(meta.durationMs / 1000) : 0;
+  const titles = [...new Set([meta.title, cleanTitle(meta.title), baseTitle(meta.title)])].filter(Boolean);
+  const core = titles[titles.length - 1];
 
   let record = null;
+  let lookups = 0;
+  const tried = new Set();
+  const consider = (candidate) => {
+    if (RANK[classify(candidate)] > RANK[classify(record)]) record = candidate;
+    return classify(record) === 'synced';
+  };
+  // Results from loose searches must still look like the right song.
+  const plausible = (r) =>
+    artists.some((a) => similar(a, r.artistName)) && titles.some((t) => similar(baseTitle(t), baseTitle(r.trackName || '')));
+
+  async function search(params, loose) {
+    const key = JSON.stringify(params);
+    if (tried.has(key) || lookups >= MAX_LOOKUPS) return false;
+    tried.add(key);
+    lookups++;
+    let results = await lrclib('/api/search', params);
+    if (loose && Array.isArray(results)) results = results.filter(plausible);
+    return consider(bestSearchResult(results, durationS));
+  }
+
+  // 1. Exact match on title, artist, album and duration.
   if (meta.title && artist && meta.album && durationS) {
-    record = await lrclib('/api/get', {
+    lookups++;
+    if (consider(await lrclib('/api/get', {
       track_name: meta.title,
       artist_name: artist,
       album_name: meta.album,
       duration: String(durationS),
-    });
+    }))) return record;
   }
-  if (classify(record) === 'synced') return record;
 
-  // Fall back to a search; try the cleaned-up title if the exact one fails.
-  const titles = [...new Set([meta.title, cleanTitle(meta.title)])].filter(Boolean);
+  // 2. Search by title + main artist, trying simpler forms of the title.
   for (const title of titles) {
-    const params = { track_name: title };
-    if (artist) params.artist_name = artist;
-    const candidate = bestSearchResult(await lrclib('/api/search', params), durationS);
-    if (RANK[classify(candidate)] > RANK[classify(record)]) record = candidate;
-    if (classify(record) === 'synced') break;
+    if (await search(artist ? { track_name: title, artist_name: artist } : { track_name: title }, false)) return record;
   }
+
+  // 3. Free-text search, then the other credited artists, then title only.
+  if (artist && (await search({ q: `${core} ${artist}` }, true))) return record;
+  for (const other of artists.slice(1, 3)) {
+    if (await search({ track_name: core, artist_name: other }, false)) return record;
+  }
+  await search({ track_name: core }, true);
   return record;
 }
 
@@ -100,7 +151,16 @@ function buildPayload(trackId, record) {
     plainLyrics: status === 'synced' || status === 'plain' ? (record.plainLyrics || '').trim() || null : null,
     message: MESSAGES[status],
     source: record ? 'lrclib' : null,
+    lookupVersion: LOOKUP_VERSION,
   };
+}
+
+// Misses (and plain-only results) are retried after a while, or right away
+// if they were found with older, weaker matching.
+function isStale(cached) {
+  if (cached.status !== 'none' && cached.status !== 'plain') return false;
+  if ((cached.payload && cached.payload.lookupVersion) !== LOOKUP_VERSION) return true;
+  return Date.now() - cached.fetchedAt > NOT_FOUND_TTL_MS;
 }
 
 class LyricsService {
@@ -111,7 +171,7 @@ class LyricsService {
 
   async get(trackId, resolveMeta) {
     const cached = await this.store.getLyrics(trackId);
-    if (cached && !(cached.status === 'none' && Date.now() - cached.fetchedAt > NOT_FOUND_TTL_MS)) {
+    if (cached && !isStale(cached)) {
       return { ...cached.payload, cached: true };
     }
     // Several clients asking for the same track share one lookup.
@@ -132,4 +192,4 @@ class LyricsService {
   }
 }
 
-module.exports = { LyricsService, cleanTitle, bestSearchResult, buildPayload };
+module.exports = { LyricsService, cleanTitle, baseTitle, norm, bestSearchResult, buildPayload };

@@ -66,3 +66,9 @@ test('buildPayload reports plain-only and missing lyrics', () => {
   assert.equal(none.status, 'none');
   assert.deepEqual(none.lines, []);
 });
+
+test('title and name normalisation helpers', () => {
+  const { baseTitle, norm } = require('../src/lyrics');
+  assert.equal(baseTitle('Song (Live at X) - 2011 Remaster'), 'Song');
+  assert.equal(norm('Beyoncé & JAY-Z'), 'beyonce and jay z');
+});
