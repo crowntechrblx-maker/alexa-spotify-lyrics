@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Link a screen</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #111; color: #eee;
+           max-width: 480px; margin: 12vh auto; padding: 0 20px; line-height: 1.5; text-align: center; }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    p { color: #aaa; }
+    input { width: 100%; font-size: 40px; letter-spacing: 0.3em; text-align: center; padding: 14px; margin: 20px 0 14px;
+            border-radius: 12px; border: 2px solid #333; background: #1b1b1b; color: #fff; font-variant-numeric: tabular-nums; }
+    input:focus { outline: none; border-color: #1ed760; }
+    button { width: 100%; font-size: 18px; font-weight: 700; padding: 14px; border: 0; border-radius: 30px; background: #1ed760; color: #000; cursor: pointer; }
+    button:disabled { opacity: 0.5; }
+    #msg { min-height: 24px; margin-top: 16px; }
+    .ok { color: #1ed760; }
+    .err { color: #ff6b6b; }
+    code { background: #222; padding: 2px 6px; border-radius: 4px; color: #ddd; }
+  </style>
+</head>
+<body>
+  <h1>Link a screen</h1>
+  <div id="form">
+    <p>Enter the 6-digit code shown on the Echo Show.</p>
+    <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000000" autofocus>
+    <button id="go" type="button">Link screen</button>
+  </div>
+  <p id="msg"></p>
+  <script>
+    (function () {
+      'use strict';
+      var params = new URLSearchParams(location.search);
+      var token = params.get('t');
+      try {
+        if (token) localStorage.setItem('displayToken', token);
+        else token = localStorage.getItem('displayToken');
+      } catch (e) { /* private mode */ }
+      // Keep the token out of the address bar / history.
+      if (params.get('t') && history.replaceState) history.replaceState(null, '', '/pair');
+
+      var msg = document.getElementById('msg');
+      var input = document.getElementById('code');
+      var btn = document.getElementById('go');
+
+      if (!token) {
+        document.getElementById('form').style.display = 'none';
+        msg.innerHTML = 'This browser doesn\'t have your display token yet.<br>Open your full display link ' +
+          '(<code>/?t=…</code>, shown after Spotify login) in this browser once, then come back here.';
+        return;
+      }
+
+      function approve() {
+        var code = input.value.replace(/\D/g, '');
+        if (code.length !== 6) { msg.className = 'err'; msg.textContent = 'The code has 6 digits.'; return; }
+        btn.disabled = true;
+        msg.className = '';
+        msg.textContent = 'Linking…';
+        fetch('/api/pair/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Display-Token': token },
+          body: JSON.stringify({ code: code })
+        }).then(function (res) {
+          return res.json().then(function (body) { return { ok: res.ok, body: body }; });
+        }).then(function (r) {
+          btn.disabled = false;
+          if (r.ok) {
+            msg.className = 'ok';
+            msg.textContent = '✅ Linked! The screen will start showing lyrics in a couple of seconds.';
+            input.value = '';
+          } else {
+            msg.className = 'err';
+            msg.textContent = r.body.error === 'bad_token'
+              ? 'The saved display token is wrong. Open your full display link in this browser again.'
+              : (r.body.message || 'That didn\'t work.');
+          }
+        }).catch(function () {
+          btn.disabled = false;
+          msg.className = 'err';
+          msg.textContent = 'Couldn\'t reach the server. Try again.';
+        });
+      }
+
+      btn.addEventListener('click', approve);
+      input.addEventListener('keydown', function (e) { if (e.key === 'Enter') approve(); });
+    })();
+  </script>
+</body>
+</html>

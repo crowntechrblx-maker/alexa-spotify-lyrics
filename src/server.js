@@ -12,6 +12,8 @@ const { LyricsService } = require('./lyrics');
 const ART_HOSTS = /(^|\.)(scdn\.co|spotifycdn\.com)$/i;
 const STATE_COOKIE = 'oauth_state';
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
+const PAIR_TTL_MS = 10 * 60 * 1000;
+const PAIR_MAX_PENDING = 20;
 
 function safeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
@@ -49,8 +51,52 @@ function sendError(res, err) {
   res.status(status).json({ error: err.code || 'server_error', message: err.message || 'Something went wrong' });
 }
 
+// Short-lived pairing requests: a screen without the token shows a 6-digit
+// code; the owner approves it from a browser that already has the token.
+function createPairing() {
+  const byId = new Map();
+
+  function sweep() {
+    const now = Date.now();
+    for (const [id, p] of byId) if (now > p.expiresAt) byId.delete(id);
+  }
+
+  return {
+    start() {
+      sweep();
+      if (byId.size >= PAIR_MAX_PENDING) return null;
+      let code;
+      do {
+        code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+      } while ([...byId.values()].some((p) => p.code === code));
+      const id = crypto.randomBytes(24).toString('base64url');
+      byId.set(id, { code, approved: false, expiresAt: Date.now() + PAIR_TTL_MS });
+      return { id, code, expiresInMs: PAIR_TTL_MS };
+    },
+    status(id) {
+      sweep();
+      const p = byId.get(id);
+      if (!p) return { status: 'expired' };
+      if (!p.approved) return { status: 'pending' };
+      byId.delete(id); // the token is handed out once
+      return { status: 'approved', token: config.displayToken };
+    },
+    approve(code) {
+      sweep();
+      for (const p of byId.values()) {
+        if (p.code === code && !p.approved) {
+          p.approved = true;
+          return true;
+        }
+      }
+      return false;
+    },
+  };
+}
+
 function createApp({ store, spotify, lyrics }) {
   const app = express();
+  const pairing = createPairing();
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
 
@@ -118,9 +164,31 @@ function createApp({ store, spotify, lyrics }) {
       page(
         'Spotify connected',
         `<h1>✅ Spotify connected</h1><p>The refresh token is saved (${escapeHtml(store.kind)} store). You won't need to log in again.</p>
-<p>Your display URL (bookmark this on the Echo Show):</p><p><a href="${escapeHtml(displayUrl)}">${escapeHtml(displayUrl)}</a></p>`
+<p>Your display URL:</p><p><a href="${escapeHtml(displayUrl)}">${escapeHtml(displayUrl)}</a></p>
+<p>On the Echo Show you don't need to type that: just open <code>${escapeHtml(req.get('host'))}</code>, then enter the code it shows at
+<a href="/pair?t=${encodeURIComponent(config.displayToken)}">${escapeHtml(req.get('host'))}/pair</a>.</p>`
       )
     );
+  });
+
+  // ---- Pairing (public; the approve step below needs the token) ------------
+
+  app.post('/pair/start', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (!config.displayToken) return res.status(503).json({ error: 'not_configured' });
+    const p = pairing.start();
+    if (!p) return res.status(429).json({ error: 'too_many', message: 'Too many pending pairing codes. Try again in a few minutes.' });
+    res.json(p);
+  });
+
+  app.get('/pair/status', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json(pairing.status(String(req.query.id || '')));
+  });
+
+  app.get('/pair', (req, res) => {
+    res.set('Cache-Control', 'no-cache');
+    res.sendFile(path.join(__dirname, '..', 'public', 'pair.html'));
   });
 
   // ---- API (protected by the display token) -------------------------------
@@ -161,6 +229,14 @@ function createApp({ store, spotify, lyrics }) {
       }
       sendError(res, err);
     }
+  });
+
+  api.post('/pair/approve', express.json({ limit: '1kb' }), (req, res) => {
+    const code = String((req.body && req.body.code) || '').replace(/\D/g, '');
+    if (code.length !== 6 || !pairing.approve(code)) {
+      return res.status(404).json({ error: 'bad_code', message: 'That code is wrong or has expired. Check the screen for the current code.' });
+    }
+    res.json({ ok: true });
   });
 
   api.post('/control/:action', async (req, res) => {

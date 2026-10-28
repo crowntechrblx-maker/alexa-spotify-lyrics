@@ -242,3 +242,42 @@ test('serves the display page with no-referrer policy', async () => {
   assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
   assert.match(await res.text(), /lyrics-panel/);
 });
+
+test('pairing: a screen gets the token only after approval with the token', async () => {
+  const start = await (await fetch(`${base}/pair/start`, { method: 'POST' })).json();
+  assert.match(start.code, /^\d{6}$/);
+  assert.ok(start.id.length > 20);
+
+  let status = await (await fetch(`${base}/pair/status?id=${start.id}`)).json();
+  assert.deepEqual(status, { status: 'pending' });
+
+  // Approving needs the display token.
+  const anon = await fetch(`${base}/api/pair/approve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: start.code }),
+  });
+  assert.equal(anon.status, 401);
+
+  const wrong = await api('/api/pair/approve', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: '12345' }),
+  });
+  assert.equal(wrong.status, 404);
+
+  const ok = await api('/api/pair/approve', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: start.code }),
+  });
+  assert.equal(ok.status, 200);
+
+  status = await (await fetch(`${base}/pair/status?id=${start.id}`)).json();
+  assert.deepEqual(status, { status: 'approved', token: TOKEN });
+  // Handed out once only.
+  status = await (await fetch(`${base}/pair/status?id=${start.id}`)).json();
+  assert.equal(status.status, 'expired');
+});
+
+test('pairing: unknown ids are expired and the pair page is served', async () => {
+  const status = await (await fetch(`${base}/pair/status?id=nope`)).json();
+  assert.equal(status.status, 'expired');
+  const page = await fetch(`${base}/pair`);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /Link a screen/);
+});

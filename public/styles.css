@@ -109,6 +109,7 @@ body.idle-mode .bg-shade { background: rgba(0, 0, 0, 0.62); }
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.5);
@@ -137,6 +138,40 @@ body.idle-mode .bg-shade { background: rgba(0, 0, 0, 0.62); }
 .controls .icon-pause { display: none; }
 .controls.playing .icon-pause { display: block; }
 .controls.playing .icon-play { display: none; }
+.control-row { display: flex; align-items: center; }
+
+.sync-row {
+  display: flex;
+  align-items: center;
+  margin-top: 4vh;
+}
+.controls button.sync {
+  width: auto;
+  height: 5.6vh;
+  padding: 0 2.2vh;
+  border-radius: 3vh;
+  font-size: 1.9vh;
+  font-weight: 700;
+  font-family: inherit;
+}
+.sync-value {
+  min-width: 15vh;
+  text-align: center;
+  font-size: 1.9vh;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Pairing code shown on a screen that hasn't been linked yet. */
+.pair-code {
+  display: block;
+  margin-top: 4vh;
+  font-size: 14vh;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
 
 .meta {
   margin-top: 3.4vh;

@@ -8,7 +8,7 @@
   // ---------- Settings ----------
 
   var POLL_MS = 3000;
-  var LYRIC_LEAD_MS = 200;          // highlight a touch early; feels more "in time"
+  var LYRIC_LEAD_MS = 0;            // base lead; per-device tweak via the Earlier/Later buttons
   var ACTIVE_LINE_POSITION = 0.4;   // active line sits 40% down the lyrics panel
   var IDLE_AFTER_PAUSE_MS = 120000; // paused this long -> idle clock screen
   var CONTROLS_VISIBLE_MS = 5000;
@@ -17,6 +17,8 @@
   var params = new URLSearchParams(location.search);
   var token = params.get('t') || storageGet('displayToken') || '';
   if (params.get('t')) storageSet('displayToken', params.get('t'));
+  // Positive = show lyrics later. Saved per device.
+  var syncOffsetMs = Number(storageGet('syncOffsetMs')) || 0;
   if (params.get('lite') === '1') document.body.classList.add('lite');
 
   // ---------- Elements ----------
@@ -152,9 +154,13 @@
     state.pollTimer = setTimeout(poll, ms);
   }
 
+  function lyricShift() {
+    return LYRIC_LEAD_MS - syncOffsetMs;
+  }
+
   function poll() {
     if (!token) {
-      showNotice('Display token missing', 'Open this page as <code>/?t=YOUR_DISPLAY_TOKEN</code>.');
+      startPairing();
       return;
     }
     var sent = performance.now();
@@ -167,8 +173,10 @@
       .catch(function (err) {
         state.failures++;
         if (err.code === 'bad_token') {
-          showNotice('Invalid display token', 'Check the <code>?t=</code> value in this page\'s address.');
-          schedulePoll(30000);
+          // Token changed on the server (or a typo): pair this screen again.
+          token = '';
+          storageSet('displayToken', '');
+          startPairing();
           return;
         }
         if (err.code === 'not_connected' || err.code === 'not_configured') {
@@ -514,7 +522,9 @@
     var total = weights.reduce(function (a, b) { return a + b; }, 0) || 1;
     var letters = total - parts.length * 2;
     // Typical singing pace; never longer than the time until the next line.
-    var singDur = exact ? span : Math.min(span - 150, letters * 75 + parts.length * 110 + 350);
+    var est = letters * 75 + parts.length * 110 + 350;
+    // Singers usually stretch a line across most of the gap before the next one.
+    var singDur = exact ? span : Math.min(span - 200, Math.max(est, Math.min(span * 0.8, est * 2.2)));
     singDur = Math.max(Math.min(span, 400), singDur);
     var t = start;
     return parts.map(function (w, i) {
@@ -622,7 +632,7 @@
 
   function applyActive(instant) {
     if (state.lyricsKind !== 'synced' || !state.lines.length) return;
-    var idx = findActive(currentPos(performance.now()) + LYRIC_LEAD_MS);
+    var idx = findActive(currentPos(performance.now()) + lyricShift());
     setActive(idx, instant);
   }
 
@@ -725,7 +735,7 @@
     }
 
     if (state.lyricsKind === 'synced') {
-      var lead = pos + LYRIC_LEAD_MS;
+      var lead = pos + lyricShift();
       setActive(findActive(lead), false);
       var item = state.lines[state.activeIdx];
       if (item) {
@@ -829,7 +839,7 @@
     else showControls();
   });
 
-  Array.prototype.forEach.call(el.controls.querySelectorAll('button'), function (btn) {
+  Array.prototype.forEach.call(el.controls.querySelectorAll('button[data-action]'), function (btn) {
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
       showControls(); // restart the 5s timer
@@ -838,6 +848,68 @@
       sendControl(action);
     });
   });
+
+  // Earlier / Later: nudge lyric timing in 0.1s steps, remembered on this device.
+  function showSyncValue() {
+    var s = (syncOffsetMs / 1000).toFixed(1);
+    $('sync-value').textContent = 'Timing ' + (syncOffsetMs > 0 ? '+' : '') + s + 's';
+  }
+  showSyncValue();
+  Array.prototype.forEach.call(el.controls.querySelectorAll('button[data-sync]'), function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      showControls();
+      syncOffsetMs = Math.max(-3000, Math.min(3000, syncOffsetMs + Number(btn.getAttribute('data-sync'))));
+      storageSet('syncOffsetMs', String(syncOffsetMs));
+      showSyncValue();
+      applyActive(false);
+    });
+  });
+
+  // ---------- Pairing (so the Echo never has to type the long token) ----------
+
+  var pairTimer = 0;
+  var pairing = false;
+
+  function startPairing() {
+    if (pairing) return;
+    pairing = true;
+    clearTimeout(pairTimer);
+    fetch('/pair/start', { method: 'POST', cache: 'no-store' })
+      .then(function (res) { return res.json(); })
+      .then(function (p) {
+        if (!p.code) throw new Error('no code');
+        var html = 'On your phone or computer, open <code>' + location.host + '/pair</code><br>and enter this code:' +
+          '<span class="pair-code">' + p.code.slice(0, 3) + ' ' + p.code.slice(3) + '</span>';
+        showNotice('Link this screen', html);
+        var expires = Date.now() + p.expiresInMs;
+        (function check() {
+          if (Date.now() > expires) { pairing = false; startPairing(); return; }
+          fetch('/pair/status?id=' + encodeURIComponent(p.id), { cache: 'no-store' })
+            .then(function (res) { return res.json(); })
+            .then(function (s) {
+              if (s.status === 'approved' && s.token) {
+                token = s.token;
+                storageSet('displayToken', token);
+                pairing = false;
+                state.mode = null;
+                poll();
+              } else if (s.status === 'pending') {
+                pairTimer = setTimeout(check, 2000);
+              } else {
+                pairing = false;
+                startPairing();
+              }
+            })
+            .catch(function () { pairTimer = setTimeout(check, 4000); });
+        })();
+      })
+      .catch(function () {
+        pairing = false;
+        showNotice('Can\'t reach the server', 'Retrying…');
+        pairTimer = setTimeout(startPairing, 5000);
+      });
+  }
 
   el.lyrics.addEventListener('click', function (e) {
     var node = e.target;

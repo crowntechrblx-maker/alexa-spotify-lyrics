@@ -23,6 +23,7 @@
         <img class="art" alt="" draggable="false">
         <img class="art" alt="" draggable="false">
         <div id="controls" class="controls" aria-hidden="true">
+          <div class="control-row">
           <button type="button" data-action="previous" aria-label="Previous">
             <svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
           </button>
@@ -33,6 +34,12 @@
           <button type="button" data-action="next" aria-label="Next">
             <svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
           </button>
+          </div>
+          <div class="sync-row">
+            <button type="button" class="sync" data-sync="-100" aria-label="Lyrics earlier">Earlier</button>
+            <span id="sync-value" class="sync-value">Timing 0.0s</span>
+            <button type="button" class="sync" data-sync="100" aria-label="Lyrics later">Later</button>
+          </div>
         </div>
       </div>
 

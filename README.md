@@ -183,10 +183,13 @@ so you never need to log in on the Echo, or again at all unless you revoke acces
 ## 5. Put it on the Echo Show
 
 1. Say **"Alexa, open Silk"** (or "Alexa, open Silk browser").
-2. Tap the address bar and type your display link:
-   `https://lyrics.example.com/?t=YOUR_DISPLAY_TOKEN`
-   - You only need to type the token once. The page remembers it, so plain
-     `https://lyrics.example.com/` works on that Echo afterwards.
+2. Type just your site address, e.g. `lyrics.example.com`. No token needed. The screen shows a
+   **6-digit code**.
+   - On your phone or computer, open your full display link (`/?t=…`, shown after the Spotify
+     login) once, then go to `lyrics.example.com/pair` in that same browser and enter the code.
+     The "Spotify connected" page also has a ready-made `/pair` link.
+   - The Echo links itself within a couple of seconds and remembers it from then on.
+   - Alternatively, type the full `https://lyrics.example.com/?t=YOUR_DISPLAY_TOKEN` link once.
 3. **Bookmark it:** open Silk's menu (the **⋮** or bookmark icon next to the address bar) and add
    a bookmark. Next time, say "Alexa, open Silk" and tap the bookmark.
 4. Tap the screen once. On touch screens the page asks to go **full screen** on first touch, which
@@ -205,6 +208,8 @@ so you never need to log in on the Echo, or again at all unless you revoke acces
 Tips:
 - Tap the album art for play/pause/skip (the buttons hide after 5 seconds). Tap a lyric line to
   jump there.
+- **Lyrics a bit early or late?** Tap the album art and use **Earlier** / **Later**. Each tap moves
+  the lyrics 0.1 s, and the setting is saved on that screen.
 - If animations stutter on your Echo, add `&lite=1` to the link. That turns off the blur, masks
   and glow and stops the background from drifting.
 
@@ -276,5 +281,6 @@ retried after 3 days in case someone adds the lyrics to LRCLIB.
 - **"Invalid display token"**: the `?t=` value doesn't match `DISPLAY_TOKEN`.
 - **Controls show "needs Spotify Premium"**: Spotify only allows playback control for Premium
   accounts. Lyrics still work without Premium.
-- **Lyrics slightly early or late**: change `LYRIC_LEAD_MS` at the top of `public/app.js`
-  (default 200 ms early).
+- **Lyrics slightly early or late**: tap the album art and use **Earlier** / **Later**.
+- **Screen asks for a code again**: the `DISPLAY_TOKEN` changed on the server, or the Echo's browser
+  data was cleared. Enter the new code at `/pair`.
